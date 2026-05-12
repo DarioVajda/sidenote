@@ -1,4 +1,4 @@
-<span style="display:inline-flex;align-items:center;font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:34px;font-weight:600;letter-spacing:-0.02em;line-height:1;overflow:hidden"><span style="background:#000;color:#fff;padding:9px 0 9px 9px">Side</span><span style="background:#fff;color:#000;padding:9px 0">note</span></span>
+# Sidenote
 
 > A local-first app for reading, annotating, and analysing research papers — with a built-in Claude Code agent that reads papers for you.
 
@@ -129,25 +129,45 @@ References are stored inline in the Markdown as `[label](ref:page=2,x1=0.12,y1=0
 
 ## Agent skills
 
-Two [Claude Code](https://claude.ai/code) skills ship with this repo and are installed automatically by `npm run setup`.
+Two [Claude Code](https://claude.ai/code) skills ship with this repo and are installed automatically by `npm run setup` into `~/.claude/skills/`. Once installed, they are available globally — you can use them from **any directory** in any Claude Code session, not just inside the Sidenote repo.
+
+> **Skills not showing up?** If Claude Code was already open when you ran `npm run setup`, restart it. Skills are discovered at startup.
+
+### Typical workflow
+
+The skills talk to the Sidenote app over HTTP, so it must be running. Start it once and leave it in the background:
+
+```bash
+# Terminal 1 — keep this running
+cd path/to/sidenote
+npm run dev
+```
+
+Then open Claude Code in your own research project and use the skills there:
+
+```bash
+# Terminal 2 — your research project
+cd your-research-project
+claude
+```
 
 ### `/before-research`
 
-Run this once in your active research repo to create a `RESEARCH_CONTEXT.md` file. The agent interviews you about your research goals, key questions, and what's out of scope — then writes the file. `/do-research` reads this context on every invocation to tailor the notes to your work.
+Run this once per research project to create a `RESEARCH_CONTEXT.md` in the current directory. The agent interviews you about your goals and open questions, then writes the file. `/do-research` reads it on every invocation to add a **Relevance** section tailored to your work.
 
 ```
-/before-research [Optional message]
+/before-research
 ```
 
 ### `/do-research`
 
-Imports a paper (or finds it in your library), reads it in multiple passes, and writes structured notes with embedded PDF references.
+Imports a paper into Sidenote (or finds it if already there), reads it in multiple passes with full visual analysis, and writes structured notes with embedded PDF references.
 
 ```bash
-# By URL (imports if not already in library)
+# By URL (imports if not already in the library)
 /do-research "https://arxiv.org/abs/1706.03762"
 
-# By approximate title (finds existing paper)
+# By approximate title (finds an existing paper)
 /do-research "attention is all you need"
 
 # With a focus directive
@@ -170,7 +190,7 @@ Review               Crop and verify every reference; patch anything wrong
 ## Method
 ## Results
 ## Limitations
-## Relevance   ← only present if RESEARCH_CONTEXT.md exists
+## Relevance   ← only present if RESEARCH_CONTEXT.md exists in the current directory
 ```
 
 **System dependencies** (checked by `npm run setup`):
