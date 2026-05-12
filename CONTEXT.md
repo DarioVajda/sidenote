@@ -1,0 +1,79 @@
+# Context
+
+Domain glossary and key concepts for Sidenote.
+
+## Terms
+
+### Paper
+A research paper tracked in the library. Added either via URL (for supported sources) or manually. The PDF and metadata are cached locally after import (see ADR-0001).
+
+### Supported Source
+One of the six primary sources with a dedicated parser: arXiv, OpenReview, ACL Anthology, PMLR, CVF, NeurIPS proceedings. Adding a paper from a supported source requires only a URL — metadata and PDF are extracted automatically.
+
+### Manual Import
+The fallback for papers not from a supported source. The user provides all metadata (title, authors, year, venue, abstract) and uploads the PDF themselves.
+
+### Title
+The title extracted automatically from the source at import time. Always stored and never modified by the user.
+
+### Abstract
+The full abstract extracted from the source at import time. Stored as-is, never edited by the user. Shown in the detail view, not on the list card.
+
+### Description
+A short optional text written by the user to summarise the paper in their own words. Shown on the list card. Never auto-populated from the Abstract.
+
+### Notes
+Free-form Markdown text attached to a Paper. The user controls structure. Toggled between edit and view (rendered) modes. Autosaved with a short debounce (~1s after the user stops typing). A save status indicator is always visible: a spinner while a save is in progress (shown for at least 1 second for legibility), then a "saved" icon once complete.
+
+### PDF Reference
+An anchor from a specific location in a Paper's Notes to a rectangular region of the PDF. The coordinates are stored inline in the markdown as a `ref:` URI — they are the source of truth. No separate DB table is used.
+
+**Format:** `[label](ref:page=2,x1=0.12,y1=0.34,x2=0.56,y2=0.78)` — coordinates normalized 0–1 relative to page dimensions, zoom-independent.
+
+**Creating a reference — two trigger methods:**
+1. **Button** — click the "link to PDF" button in the notes toolbar. If text is selected, it becomes the label. If nothing is selected, a placeholder `[Insert text…](ref:…)` is inserted with "Insert text…" pre-selected.
+2. **Typing** — type `[any text](ref:` in the editor. The moment this pattern is complete, selection mode activates automatically.
+
+**Selection mode** (activated by either trigger): everything outside the PDF panel dims subtly; a short instruction message appears at the top of the PDF panel. The user drags a rectangle over any region of the PDF. On release, the `ref:` URI is completed with the captured coordinates and selection mode ends.
+
+**In view (preview) mode:** PDF reference links render with a small distinct icon (not the same as regular URL links). Clicking one scrolls the PDF to the correct page and draws a highlight rectangle over the referenced region. The highlight fades out after ~2 seconds.
+
+### Folder
+A named node in a recursive tree that organises Papers. Each Paper belongs to at most one Folder (or none). Folders can contain subfolders to any depth. The tree is stored as an adjacency list (each Folder has an optional parent Folder).
+
+The Folder Sidebar shows the full tree. Selecting a Folder displays all Papers inside it and all its descendants. "All Papers" (top of sidebar) shows every non-trashed Paper regardless of Folder.
+
+Papers are assigned a Folder at import time; the default is whichever Folder is currently selected in the sidebar. Papers and Folders can both be moved by dragging them onto a different Folder in the sidebar (cycle prevention enforced — a Folder cannot be dropped into its own descendant).
+
+Deleting a Folder moves all Papers inside it (at any depth) to the Trash and warns the user before proceeding.
+
+### Trash
+A holding area for deleted Papers. Papers land in Trash when: (a) the user deletes a Paper directly, or (b) a Folder containing Papers is deleted. Papers are permanently purged 30 days after they enter Trash. The user can restore a Paper from Trash or delete it permanently at any time. "Empty Trash" removes all Trash items immediately. The Trash auto-purges stale items silently on app load.
+
+Trash is a fixed entry at the bottom of the Folder Sidebar showing the count of items inside.
+
+### Reading Status
+A per-paper status with three states:
+- **To Read** — paper has been added but not yet started
+- **Reading** — currently being read
+- **Done** — finished reading
+
+Visible on each card in the Paper List. Can be changed from the list or the detail view.
+
+### Paper List
+The default view. Papers sorted by date added, most recent first. Each card shows: title, short description, authors, date added, and Reading Status.
+
+### Navigation
+A persistent top nav bar containing the app logo/name (always navigates to the Paper List) and a theme toggle (switches between light and dark mode, preference saved to localStorage).
+
+### Add Paper Modal
+An overlay modal triggered by the "Add paper" button on the Paper List. For supported sources: a URL input field — metadata and PDF are extracted on submit. For manual import: a full form (title, authors, year, venue, abstract, PDF upload). The modal is taller for manual import but does not navigate away from the list.
+
+If auto-import fails, an error is shown and the user is dropped into the manual import form with any successfully extracted fields pre-filled.
+
+### Detail View Layout
+The split-screen view for a Paper. Contains a header and a split-screen body.
+
+**Header** (above the split): title, authors, year, venue, source URL, and Reading Status — all visible at a glance. Description is editable inline. Abstract is hidden behind a "show abstract" toggle.
+
+**Body**: PDF panel and Notes panel separated by a draggable divider. The user can swap the positions of the two panels. Divider position and panel order are persisted per-paper.
