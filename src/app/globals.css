@@ -4,10 +4,22 @@
 
 :root {
   color-scheme: light;
+  font-size: 17px;
 }
 
 .dark {
   color-scheme: dark;
+}
+
+/* Light code blocks in prose preview */
+.prose {
+  --tw-prose-pre-bg: rgb(243 244 246); /* gray-100 */
+  --tw-prose-pre-code: rgb(31 41 55); /* gray-800 */
+}
+
+.dark .prose {
+  --tw-prose-pre-bg: rgb(39 39 42); /* zinc-800 */
+  --tw-prose-pre-code: rgb(228 228 231); /* zinc-200 */
 }
 
 /* CodeMirror editor fills its container and uses the app's mono font */
