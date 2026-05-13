@@ -15,6 +15,8 @@ import { markdown, markdownLanguage } from '@codemirror/lang-markdown';
 import { languages } from '@codemirror/language-data';
 import { githubLight, githubDark } from '@uiw/codemirror-theme-github';
 import { EditorView } from '@codemirror/view';
+import ChatBox from '@/components/papers/ChatBox';
+import QALog from '@/components/papers/QALog';
 
 const PdfViewer = dynamic(() => import('@/components/papers/PdfViewer'), { ssr: false });
 
@@ -98,14 +100,77 @@ export default function PaperDetailPage({ params }: { params: Promise<{ id: stri
   const [panelOrder, setPanelOrder] = useState<PanelOrder>('notes-left');
   const containerRef = useRef<HTMLDivElement>(null);
   const isDragging = useRef(false);
+  const [dividerDragging, setDividerDragging] = useState(false);
 
   const [selectionMode, setSelectionMode] = useState(false);
   const [activeRef, setActiveRef] = useState<PdfRef | null>(null);
   const pendingInsertRef = useRef<PendingInsert | null>(null);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const editorViewRef = useRef<any>(null);
+  const pendingSelectRef = useRef<{ word: string; line: number | null } | null>(null);
+
+  // Chat / Q&A state
+  const [chatOpen, setChatOpen] = useState(false);
+  const [toastVisible, setToastVisible] = useState(false);
+  const [questionSelectionMode, setQuestionSelectionMode] = useState(false);
+  const [questionPdfRegion, setQuestionPdfRegion] = useState<PdfRef | null>(null);
+  const [questionTextContext, setQuestionTextContext] = useState<string | null>(null);
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; text: string } | null>(null);
+  const [qaRefreshKey, setQaRefreshKey] = useState(0);
+
+  useEffect(() => { if (questionTextContext) setChatOpen(true); }, [questionTextContext]);
+
+  function handlePromptCopied() {
+    setToastVisible(true);
+    setTimeout(() => setToastVisible(false), 1800);
+  }
 
   const dark = useDark();
+
+  // Cmd/Ctrl+Enter — switch to preview
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'Enter' && mode === 'edit') {
+        e.preventDefault();
+        if (editorViewRef.current) setNotes(editorViewRef.current.state.doc.toString());
+        setMode('preview');
+      }
+    };
+    document.addEventListener('keydown', handler);
+    return () => document.removeEventListener('keydown', handler);
+  }, [mode]);
+
+  // After switching to edit mode, apply any pending word selection from a preview double-click
+  useEffect(() => {
+    if (mode !== 'edit' || !pendingSelectRef.current) return;
+    const { word, line } = pendingSelectRef.current;
+    pendingSelectRef.current = null;
+    requestAnimationFrame(() => {
+      const view = editorViewRef.current;
+      if (!view) return;
+      const doc = view.state.doc;
+      const docStr = doc.toString();
+      let pos: number | null = null;
+      if (line !== null) {
+        try {
+          const lineObj = doc.line(line);
+          const idx = docStr.indexOf(word, lineObj.from);
+          pos = idx !== -1 ? idx : lineObj.from;
+        } catch { /* line out of range */ }
+      }
+      if (pos === null) {
+        const idx = docStr.indexOf(word);
+        if (idx !== -1) pos = idx;
+      }
+      if (pos !== null) {
+        view.dispatch({
+          selection: { anchor: pos, head: pos + word.length },
+          effects: EditorView.scrollIntoView(pos, { y: 'center' }),
+        });
+      }
+      view.focus();
+    });
+  }, [mode]);
 
   useEffect(() => {
     fetch(`/api/papers/${id}`)
@@ -114,6 +179,7 @@ export default function PaperDetailPage({ params }: { params: Promise<{ id: stri
         if (data?.error) { setLoading(false); return; }
         setPaper(data);
         setNotes(data.notes ?? '');
+        if (data.notes) setMode('preview');
         setLoading(false);
       });
   }, [id]);
@@ -138,6 +204,7 @@ export default function PaperDetailPage({ params }: { params: Promise<{ id: stri
 
   function onDividerPointerDown(e: React.PointerEvent<HTMLDivElement>) {
     isDragging.current = true;
+    setDividerDragging(true);
     e.currentTarget.setPointerCapture(e.pointerId);
   }
   function onDividerPointerMove(e: React.PointerEvent<HTMLDivElement>) {
@@ -145,7 +212,10 @@ export default function PaperDetailPage({ params }: { params: Promise<{ id: stri
     const rect = containerRef.current.getBoundingClientRect();
     setLeftPct(Math.max(20, Math.min(80, ((e.clientX - rect.left) / rect.width) * 100)));
   }
-  function onDividerPointerUp() { isDragging.current = false; }
+  function onDividerPointerUp() {
+    isDragging.current = false;
+    setDividerDragging(false);
+  }
 
   function handleRefToolbarClick() {
     const view = editorViewRef.current;
@@ -161,6 +231,11 @@ export default function PaperDetailPage({ params }: { params: Promise<{ id: stri
   }
 
   function handleRegionSelected(ref: PdfRef) {
+    if (questionSelectionMode) {
+      setQuestionSelectionMode(false);
+      setQuestionPdfRegion(ref);
+      return;
+    }
     setSelectionMode(false);
     const pending = pendingInsertRef.current;
     pendingInsertRef.current = null;
@@ -210,9 +285,13 @@ export default function PaperDetailPage({ params }: { params: Promise<{ id: stri
   const pdfPanel = (
     <PdfViewer
       url={`/api/papers/${id}/pdf`}
-      selectionMode={selectionMode}
+      selectionMode={selectionMode || questionSelectionMode}
       onRegionSelected={handleRegionSelected}
-      onCancelSelection={() => { setSelectionMode(false); pendingInsertRef.current = null; }}
+      onCancelSelection={() => {
+        if (questionSelectionMode) { setQuestionSelectionMode(false); return; }
+        setSelectionMode(false);
+        pendingInsertRef.current = null;
+      }}
       activeRef={activeRef}
     />
   );
@@ -228,6 +307,7 @@ export default function PaperDetailPage({ params }: { params: Promise<{ id: stri
               onClick={() => {
                 if (m === 'preview' && editorViewRef.current) {
                   setNotes(editorViewRef.current.state.doc.toString());
+                  setQaRefreshKey((k) => k + 1);
                 }
                 setMode(m);
               }}
@@ -244,6 +324,24 @@ export default function PaperDetailPage({ params }: { params: Promise<{ id: stri
         <div className="flex items-center gap-2">
           <SaveIndicator status={saveStatus} />
           {mode === 'edit' && (
+            <>
+            <button
+              onClick={() => {
+                const view = editorViewRef.current;
+                if (!view) return;
+                const sel = view.state.selection.main;
+                if (sel.from !== sel.to) {
+                  setQuestionTextContext(view.state.sliceDoc(sel.from, sel.to));
+                }
+              }}
+              title="Ask about selected text"
+              className="flex items-center gap-1 text-xs text-gray-400 dark:text-zinc-500 hover:text-gray-700 dark:hover:text-zinc-300 px-2 py-1 rounded hover:bg-gray-100 dark:hover:bg-zinc-700 transition-colors"
+            >
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+                <line x1="9" y1="10" x2="15" y2="10" /><line x1="12" y1="7" x2="12" y2="13" />
+              </svg>
+            </button>
             <button
               onClick={handleRefToolbarClick}
               title="Link selected text to a PDF region"
@@ -259,6 +357,7 @@ export default function PaperDetailPage({ params }: { params: Promise<{ id: stri
                 <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
               </svg>
             </button>
+            </>
           )}
         </div>
       </div>
@@ -293,13 +392,13 @@ export default function PaperDetailPage({ params }: { params: Promise<{ id: stri
                 }
               }
             }}
-            extensions={[markdown({ base: markdownLanguage, codeLanguages: languages }), EditorView.lineWrapping]}
+            extensions={[markdown({ base: markdownLanguage, codeLanguages: languages }), EditorView.lineWrapping, EditorView.theme({ '.cm-content': { paddingBottom: '50vh' } })]}
             theme={dark ? githubDark : githubLight}
             basicSetup={{
               lineNumbers: false,
               foldGutter: false,
               highlightActiveLine: true,
-              highlightSelectionMatches: true,
+              highlightSelectionMatches: false,
               closeBrackets: false,
               autocompletion: false,
             }}
@@ -307,13 +406,42 @@ export default function PaperDetailPage({ params }: { params: Promise<{ id: stri
             className="h-full text-sm"
           />
         ) : (
-          <div className="p-5 prose prose-sm dark:prose-invert max-w-none">
+          <div
+            className="pt-5 px-5 pb-[50vh] prose prose-sm dark:prose-invert max-w-none"
+            onContextMenu={(e) => {
+              const selected = window.getSelection()?.toString().trim();
+              if (!selected) return;
+              e.preventDefault();
+              setContextMenu({ x: e.clientX, y: e.clientY, text: selected });
+            }}
+            onDoubleClick={(e) => {
+              const word = window.getSelection()?.toString().trim();
+              if (!word) return;
+              let el = e.target as HTMLElement | null;
+              while (el && !el.dataset.sourceLine) el = el.parentElement;
+              const line = el?.dataset.sourceLine ? parseInt(el.dataset.sourceLine) : null;
+              pendingSelectRef.current = { word, line };
+              setMode('edit');
+            }}
+          >
             {notes ? (
               <ReactMarkdown
                 remarkPlugins={[remarkGfm, remarkMath]}
                 rehypePlugins={[rehypeKatex]}
                 urlTransform={(url) => url}
                 components={{
+                  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                  p({ node, children }: any) { return <p data-source-line={node?.position?.start.line}>{children}</p>; },
+                  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                  h1({ node, children }: any) { return <h1 data-source-line={node?.position?.start.line}>{children}</h1>; },
+                  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                  h2({ node, children }: any) { return <h2 data-source-line={node?.position?.start.line}>{children}</h2>; },
+                  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                  h3({ node, children }: any) { return <h3 data-source-line={node?.position?.start.line}>{children}</h3>; },
+                  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                  li({ node, children }: any) { return <li data-source-line={node?.position?.start.line}>{children}</li>; },
+                  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                  blockquote({ node, children }: any) { return <blockquote data-source-line={node?.position?.start.line}>{children}</blockquote>; },
                   // eslint-disable-next-line @typescript-eslint/no-explicit-any
                   a({ href, children }: any) {
                     if (href?.startsWith('ref:')) {
@@ -343,6 +471,7 @@ export default function PaperDetailPage({ params }: { params: Promise<{ id: stri
             ) : (
               <p className="text-gray-400 dark:text-zinc-500 italic not-prose text-sm">No notes yet.</p>
             )}
+            {paper && <QALog paperId={paper.id} refreshKey={qaRefreshKey} />}
           </div>
         )}
       </div>
@@ -359,7 +488,11 @@ export default function PaperDetailPage({ params }: { params: Promise<{ id: stri
             <Link href="/" className="text-xs text-gray-400 dark:text-zinc-500 hover:text-gray-600 dark:hover:text-zinc-400 block mb-1">
               ← Papers
             </Link>
-            <p className="text-gray-900 dark:text-zinc-100 font-medium leading-snug line-clamp-1">{title}</p>
+            {paper.sourceUrl ? (
+              <a href={paper.sourceUrl} target="_blank" rel="noopener noreferrer" className="text-gray-900 dark:text-zinc-100 font-medium leading-snug line-clamp-1 hover:underline hover:text-blue-600 dark:hover:text-blue-400">{title}</a>
+            ) : (
+              <p className="text-gray-900 dark:text-zinc-100 font-medium leading-snug line-clamp-1">{title}</p>
+            )}
             <p className="text-sm text-gray-500 dark:text-zinc-400 mt-0.5 truncate">
               {paper.authors.map((author, i) => (
                 <span key={author}>
@@ -410,7 +543,7 @@ export default function PaperDetailPage({ params }: { params: Promise<{ id: stri
       </div>
 
       <div ref={containerRef} className="flex-1 flex min-h-0 overflow-hidden">
-        <div style={{ width: `${leftPct}%` }} className="min-w-0 overflow-hidden flex flex-col">
+        <div style={{ width: `${leftPct}%` }} className={`min-w-0 overflow-hidden flex flex-col${dividerDragging ? ' pointer-events-none select-none' : ''}`}>
           {isPdfLeft ? pdfPanel : notesPanel}
         </div>
 
@@ -432,13 +565,83 @@ export default function PaperDetailPage({ params }: { params: Promise<{ id: stri
               <path d="M8 3 4 7l4 4" /><path d="M4 7h16" /><path d="m16 21 4-4-4-4" /><path d="M20 17H4" />
             </svg>
           </button>
+          {/* Ask pill */}
+          <button
+            className="absolute z-20 flex items-center gap-2 px-4 py-2 rounded-full text-white text-xs font-medium whitespace-nowrap cursor-pointer hover:brightness-110"
+            style={{
+              bottom: 20,
+              left: '50%',
+              background: 'linear-gradient(135deg, #3b82f6, #a855f7, #ec4899)',
+              boxShadow: '0 4px 20px rgba(168,85,247,0.4)',
+              opacity: chatOpen ? 0 : 1,
+              pointerEvents: chatOpen ? 'none' : 'auto',
+              transform: chatOpen ? 'translateX(-50%) scale(0.9)' : 'translateX(-50%)',
+              transition: 'opacity 250ms ease, transform 250ms ease',
+            }}
+            onPointerDown={(e) => e.stopPropagation()}
+            onClick={() => setChatOpen(true)}
+            title="Ask a question about this paper"
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+            </svg>
+            Ask a question…
+          </button>
         </div>
 
-        <div className="flex-1 min-w-0 overflow-hidden flex flex-col">
+        <div className={`flex-1 min-w-0 overflow-hidden flex flex-col${dividerDragging ? ' pointer-events-none select-none' : ''}`}>
           {isPdfLeft ? notesPanel : pdfPanel}
         </div>
       </div>
+
     </div>
+
+    <ChatBox
+      open={chatOpen}
+      onClose={() => setChatOpen(false)}
+      onCopied={handlePromptCopied}
+      paper={paper}
+      notes={notes}
+      onRequestPdfRegion={() => setQuestionSelectionMode(true)}
+      pdfRegion={questionPdfRegion}
+      onClearPdfRegion={() => setQuestionPdfRegion(null)}
+      textContext={questionTextContext}
+      onClearTextContext={() => setQuestionTextContext(null)}
+    />
+
+    {/* Copied toast */}
+    <div
+      className="fixed inset-0 flex items-center justify-center pointer-events-none z-[70] transition-opacity duration-300"
+      style={{ opacity: toastVisible ? 1 : 0 }}
+    >
+      <div className="bg-gray-900/90 dark:bg-white/90 text-white dark:text-gray-900 text-sm px-5 py-2.5 rounded-full shadow-2xl">
+        Prompt copied to clipboard
+      </div>
+    </div>
+
+    {/* Context menu for preview text selection */}
+    {contextMenu && (
+      <>
+        <div className="fixed inset-0 z-40" onClick={() => setContextMenu(null)} />
+        <div
+          className="fixed z-50 bg-white dark:bg-zinc-800 border border-gray-200 dark:border-zinc-700 rounded-lg shadow-lg py-1 min-w-[160px]"
+          style={{ left: contextMenu.x, top: contextMenu.y }}
+        >
+          <button
+            onClick={() => {
+              setQuestionTextContext(contextMenu.text);
+              setContextMenu(null);
+            }}
+            className="w-full flex items-center gap-2 px-3 py-1.5 text-sm text-gray-700 dark:text-zinc-300 hover:bg-gray-100 dark:hover:bg-zinc-700 transition-colors text-left"
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+            </svg>
+            Ask about this
+          </button>
+        </div>
+      </>
+    )}
     </>
   );
 }

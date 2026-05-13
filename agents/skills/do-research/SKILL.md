@@ -89,12 +89,13 @@ Write tight. Every sentence must earn its place.
 - **Results:** the 3–5 numbers that matter most; one sentence of context per result
 - **Limitations:** 3–5 bullet points
 - **Relevance:** 3–6 bullet points mapping the paper to Key Questions
+- **Further Reading:** 3–6 entries, ranked by importance
 
 Total notes should be readable in under 10 minutes.
 
 ### Notes format
 
-Exactly these five `##` sections. Add `###` subsections within any section as needed. Omit `## Relevance` entirely if no `RESEARCH_CONTEXT.md` was found.
+Exactly these `##` sections in this order. Add `###` subsections within any section as needed. Omit `## Relevance` entirely if no `RESEARCH_CONTEXT.md` was found.
 
 ```markdown
 ## Overview
@@ -116,6 +117,10 @@ Exactly these five `##` sections. Add `###` subsections within any section as ne
 ## Relevance
 
 [Only if RESEARCH_CONTEXT.md exists. Bullet list mapping each Key Question to what the paper says about it. End with a "Watch out for:" line if relevant.]
+
+## Further Reading
+
+[3–6 papers from the bibliography, ranked by relevance. See instructions below.]
 ```
 
 ### Mathematics
@@ -124,7 +129,7 @@ Write all mathematical expressions in LaTeX. Use `$...$` for inline math and `$$
 
 ### Embedding PDF references
 
-Every significant factual claim in Method and Results must be anchored with a PDF reference:
+**Every claim a reader might want to verify must be anchored with a PDF reference.** This is not limited to figures and tables — inline claims in running text are equally important. Specific numbers, architectural choices, training details, comparisons, ablation observations, and limitations all need references. The purpose of these notes is to let the reader verify any claim by clicking a single link, rather than having to search the paper manually. Dense reference coverage is a core quality signal.
 
 ```
 [link text](ref:page=N,x1=X,y1=Y,x2=X2,y2=Y2)
@@ -134,9 +139,49 @@ Every significant factual claim in Method and Results must be anchored with a PD
 - `x1, y1` = top-left corner, normalized 0–1 (0,0 = top-left of page)
 - `x2, y2` = bottom-right corner, normalized 0–1
 
-**Estimating coordinates:** Look at the rendered PNG. Identify the target element's bounding box as fractions of the image width and height. Add ~3% padding on each side. State your reasoning explicitly before writing the coordinates: "The results table spans the full width, from roughly y=0.42 to y=0.71" → `x1=0.03,y1=0.42,x2=0.97,y2=0.71`.
+**STRICT RULE — link text is 1–4 words. No exceptions.**
 
-Aim for at least one PDF reference per `###` subsection. Architecture diagrams, result tables, and ablation tables must always be referenced.
+Using a sentence or clause as link text is strictly prohibited. It breaks the UI and makes the notes unreadable. If you find yourself writing more than 4 words inside `[...]`, stop and use `[(ref)]` instead.
+
+The only two legal patterns are:
+
+```markdown
+The model achieves 84.2% accuracy [on ImageNet](ref:page=4,...).
+The model achieves 84.2% accuracy using a two-layer cross-attention block. [(ref)](ref:page=4,...)
+```
+
+**Rule:** if a natural 1–4 word anchor exists in the sentence (a number, a name, a short term), use it as the link text. If no short anchor fits naturally, append `[(ref)](ref:...)` at the end of the sentence — never stretch the link text to make it "fit". When in doubt, use `[(ref)]`.
+
+**Estimating coordinates:** Before writing any coordinates, study the full page image carefully and reason explicitly about the bounding box: identify the element's top, bottom, left, and right edges as fractions of page height/width. State this reasoning in one sentence before writing the coordinates — "The results table runs full width, top edge at roughly y=0.42, bottom at y=0.71" → `x1=0.03,y1=0.42,x2=0.97,y2=0.71`. The goal is to get the box right on the first attempt through careful analysis.
+
+Aim for dense coverage: at minimum one PDF reference per `###` subsection, but typically several. Architecture diagrams, result tables, ablation tables, and every specific number or claim in the text must be referenced.
+
+### Further Reading
+
+While reading the paper, note which referenced works are cited most prominently — introduced in the abstract or introduction as direct predecessors, used as primary baselines, described in dedicated related-work paragraphs, or cited repeatedly across multiple sections. These signal the papers the authors considered most load-bearing.
+
+After the deep read, select 3–6 of those works for the Further Reading section. Rank them as follows:
+
+1. **If `RESEARCH_CONTEXT.md` exists:** rank primarily by how well the paper maps to the Key Questions and research goals, then secondarily by how central it was to the target paper.
+2. **If no context exists:** rank purely by how central the paper was to the target paper (frequency of citation, role as baseline or foundation).
+
+For each entry, include:
+- Full title and authors (as they appear in the bibliography)
+- Year and venue if available
+- One sentence on its role in the target paper (e.g. "primary baseline for the main results table", "introduced the architecture this work extends")
+- If `RESEARCH_CONTEXT.md` exists and the paper is relevant to your research: one sentence on why
+
+Format:
+
+```markdown
+## Further Reading
+
+- **Title** · Authors · Year · Venue
+  Role in this paper: [one sentence].
+  [Relevance to your research: one sentence. — only if RESEARCH_CONTEXT.md exists and relevant]
+
+- ...
+```
 
 ### Write the notes
 
@@ -149,25 +194,37 @@ PUT {base}/api/papers/{id}
 
 ## Step 5 — Review + patch
 
-For every PDF reference in the saved notes, verify it precisely:
+For every PDF reference in the saved notes, verify and refine it through up to 3 rounds:
 
 1. Ensure the page image is rendered (render it now if not already cached).
-2. Crop the referenced region from the image using Python:
+
+2. Crop the referenced region **expanded by 30% on every side** so you can see both the reference box and its immediate surroundings:
 
 ```bash
 python3 - <<'EOF'
 from PIL import Image
 img = Image.open("<imagePath>")
 w, h = img.size
-crop = img.crop((int(X1*w), int(Y1*h), int(X2*w), int(Y2*h)))
+x1, y1, x2, y2 = X1, Y1, X2, Y2
+xm, ym = (x2 - x1) * 0.30, (y2 - y1) * 0.30
+cx1, cy1 = max(0.0, x1 - xm), max(0.0, y1 - ym)
+cx2, cy2 = min(1.0, x2 + xm), min(1.0, y2 + ym)
+crop = img.crop((int(cx1*w), int(cy1*h), int(cx2*w), int(cy2*h)))
 crop.save("/tmp/verify_crop.png")
-print(f"Crop saved: {w}x{h}px image, region ({int(X1*w)},{int(Y1*h)}) to ({int(X2*w)},{int(Y2*h)})")
+print(f"Image: {w}x{h}. Margined crop: ({int(cx1*w)},{int(cy1*h)}) → ({int(cx2*w)},{int(cy2*h)})")
 EOF
 ```
 
-3. Read `/tmp/verify_crop.png`. The crop must clearly show the intended element (figure, table, equation). If it shows mostly whitespace, a wrong element, or is cut off, the coordinates are wrong — go back to the full page image, restate your bounding box reasoning, and recompute.
+3. Read `/tmp/verify_crop.png`. The 30% margin lets you see what is just outside the reference box. Assess:
+   - Is the intended element (figure, equation, table row, sentence) fully captured, or clipped?
+   - Is the box capturing extra unrelated content above, below, or beside it?
+   - Is the box offset — does the visible margin reveal that the element starts outside the current box?
 
 4. Also verify the claim itself — does the paper actually say this? If not, fix the text.
+
+**If the crop looks correct, move on immediately — do not re-crop.**
+
+If the crop reveals a clear, specific problem (e.g. "the top of the table is cut off" or "there is an unrelated paragraph below"), name the exact problem, state the corrected coordinates with reasoning, update, and run one more crop to confirm. Only run a third round if the second crop still shows a specific named error. The goal is one well-reasoned crop that confirms a carefully estimated box — not iterative guessing.
 
 Fix errors immediately via `PUT` before moving to the next reference.
 

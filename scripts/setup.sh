@@ -23,7 +23,7 @@ echo "→ Installing Claude Code agent skills..."
 CLAUDE_SKILLS="$HOME/.claude/skills"
 mkdir -p "$CLAUDE_SKILLS"
 
-for skill in do-research before-research; do
+for skill in do-research before-research ask-paper; do
   SKILL_SRC="$REPO_ROOT/agents/skills/$skill"
   SKILL_LINK="$CLAUDE_SKILLS/$skill"
 
