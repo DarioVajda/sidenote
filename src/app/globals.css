@@ -18,7 +18,7 @@
 }
 
 .dark .prose {
-  --tw-prose-pre-bg: rgb(39 39 42); /* zinc-800 */
+  --tw-prose-pre-bg: rgb(63 63 70); /* zinc-700 */
   --tw-prose-pre-code: rgb(228 228 231); /* zinc-200 */
 }
 
