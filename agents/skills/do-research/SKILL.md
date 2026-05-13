@@ -19,20 +19,42 @@ If present, treat this as a focus directive: allocate extra depth to the named t
 
 ## Step 1 — Resolve the paper
 
-The user's input is either a URL or an approximate paper title, with an optional quoted focus directive after it.
+The user's input is one of: a URL, an approximate title, or a full citation string (e.g. `Vaswani et al., "Attention Is All You Need", NeurIPS 2017`). An optional quoted focus directive may follow.
 
-**If it looks like a URL:**
+**If it looks like a URL:** import directly:
 ```
 POST {base}/api/import
 {"url": "<url>"}
 ```
 Response is the paper object (status 200 = already existed, 201 = freshly imported). Extract `id`.
 
-**If it looks like a title/description:**
-```
-GET {base}/api/papers
-```
-Fuzzy-match the user's description against `originalTitle` and `customTitle` fields. Pick the closest match. If no match is found, tell the user you couldn't find it and ask for a URL.
+**If it looks like a title or citation string:**
+
+1. **Check the local library first:**
+   ```
+   GET {base}/api/papers
+   ```
+   Fuzzy-match against `originalTitle` and `customTitle`. If a confident match is found, use that `id` and skip the rest of this step.
+
+2. **Infer a direct URL from the citation.** If the input includes enough metadata (venue, year, authors), reason about where the canonical version lives:
+   - NeurIPS / ICML / ICLR / ACL / EMNLP / NAACL / CVPR / ICCV / ECCV / AAAI and most ML/NLP/CV venues → try `https://arxiv.org/search/?query=<title>&searchtype=all`; fetch the page and extract the first result's `/abs/` link, then convert to `https://arxiv.org/pdf/<id>`
+   - ACL Anthology venues (ACL, EMNLP, NAACL, EACL, etc.) → also try `https://aclanthology.org/search/?q=<title>` for a direct PDF
+   - If the DOI is known or inferable (e.g. from a journal citation), try `https://doi.org/<doi>`
+
+   Attempt `POST {base}/api/import` with the inferred URL. If it succeeds (200 or 201), proceed.
+
+3. **arXiv search fallback.** If no URL could be inferred or the import failed, search the arXiv API:
+   ```
+   https://export.arxiv.org/api/query?search_query=ti:<title terms>&max_results=3
+   ```
+   Parse the Atom XML response, pick the best title match, extract its `<id>` URL (convert `/abs/` → `/pdf/` for the import), and attempt `POST {base}/api/import`.
+
+4. **Google Scholar fallback.** If arXiv returns no useful results (paper is not on arXiv), construct a search URL and ask the user to locate the PDF:
+   ```
+   https://scholar.google.com/scholar?q=<url-encoded title and authors>
+   ```
+   Print: "Couldn't locate a PDF automatically. Try this Scholar search: <url> — paste the PDF or abstract URL here and I'll continue."
+   Wait for the user to provide a URL, then import it.
 
 Once you have the paper ID, download the PDF to a temp file:
 
@@ -166,22 +188,29 @@ After the deep read, select 3–6 of those works for the Further Reading section
 2. **If no context exists:** rank purely by how central the paper was to the target paper (frequency of citation, role as baseline or foundation).
 
 For each entry, include:
-- Full title and authors (as they appear in the bibliography)
-- Year and venue if available
+- Full citation: title, all authors as listed in the bibliography, year, venue/journal, and volume/pages if present
 - One sentence on its role in the target paper (e.g. "primary baseline for the main results table", "introduced the architecture this work extends")
 - If `RESEARCH_CONTEXT.md` exists and the paper is relevant to your research: one sentence on why
+- A `/do-research` prompt box using the full citation string so the agent can auto-resolve it without a URL. The focus directive should tell a future agent exactly what to pay attention to — which mechanism, which result, which open question — so that reading that paper directly advances the research agenda. Make it specific and opinionated, not generic.
 
 Format:
 
 ```markdown
 ## Further Reading
 
-- **Title** · Authors · Year · Venue
+- **Title** · Firstname Lastname, Firstname Lastname · Year · Venue
+  Full citation: Lastname, F., Lastname, F., et al. "Title." *Venue* (Year).
   Role in this paper: [one sentence].
   [Relevance to your research: one sentence. — only if RESEARCH_CONTEXT.md exists and relevant]
 
+  ```prompt
+  /do-research "Lastname et al., 'Title', Venue Year" "[specific focus directive: what to zoom in on, what to skip, and why it matters for the research agenda]"
+  ```
+
 - ...
 ```
+
+**Writing the focus directive:** Combine two things — (1) what aspect of this paper was most load-bearing in the current work (the baseline it provides, the technique it introduces, the dataset it defines), and (2) which Key Question from `RESEARCH_CONTEXT.md` it most directly speaks to. The directive should read as a concrete instruction: "focus on X because it bears on Y", not "this paper is interesting". If no `RESEARCH_CONTEXT.md` exists, base the directive purely on what angle would be most useful given the current paper's findings.
 
 ### Write the notes
 

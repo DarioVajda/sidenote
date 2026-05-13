@@ -21,7 +21,7 @@ export default function Nav() {
   return (
     <nav className="h-14 border-b border-gray-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 px-6 flex items-center justify-between shrink-0">
       <Link href="/" className="hover:opacity-75 transition-opacity">
-        <Logo size="lg" />
+        <Logo size="lg" className="ring-1 ring-white" />
       </Link>
       <button
         onClick={toggle}

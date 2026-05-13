@@ -72,6 +72,37 @@ function PdfRefIcon() {
   );
 }
 
+function PromptBox({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+  function copy() {
+    navigator.clipboard.writeText(text).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    });
+  }
+  return (
+    <span className="not-prose my-2 flex items-start gap-2 rounded-md bg-gray-100 dark:bg-zinc-700 px-3 py-2 font-mono text-sm text-gray-800 dark:text-zinc-200 relative group">
+      <span className="flex-1 whitespace-pre-wrap break-words">{text}</span>
+      <button
+        onClick={copy}
+        title="Copy prompt"
+        className="shrink-0 mt-0.5 text-gray-400 dark:text-zinc-400 hover:text-gray-700 dark:hover:text-zinc-100 transition-colors"
+      >
+        {copied ? (
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="20 6 9 17 4 12" />
+          </svg>
+        ) : (
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+          </svg>
+        )}
+      </button>
+    </span>
+  );
+}
+
 function useDark() {
   const [dark, setDark] = useState(false);
   useEffect(() => {
@@ -442,6 +473,14 @@ export default function PaperDetailPage({ params }: { params: Promise<{ id: stri
                   li({ node, children }: any) { return <li data-source-line={node?.position?.start.line}>{children}</li>; },
                   // eslint-disable-next-line @typescript-eslint/no-explicit-any
                   blockquote({ node, children }: any) { return <blockquote data-source-line={node?.position?.start.line}>{children}</blockquote>; },
+                  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                  code({ className, children }: any) {
+                    if (className === 'language-prompt') {
+                      const text = String(children).trim();
+                      return <PromptBox text={text} />;
+                    }
+                    return <code className={className}>{children}</code>;
+                  },
                   // eslint-disable-next-line @typescript-eslint/no-explicit-any
                   a({ href, children }: any) {
                     if (href?.startsWith('ref:')) {
