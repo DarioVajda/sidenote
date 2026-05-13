@@ -7,6 +7,9 @@ import { generateBibtex } from '@/lib/bibtex';
 import Link from 'next/link';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import remarkMath from 'remark-math';
+import rehypeKatex from 'rehype-katex';
+import 'katex/dist/katex.min.css';
 import CodeMirror from '@uiw/react-codemirror';
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown';
 import { languages } from '@codemirror/language-data';
@@ -222,7 +225,12 @@ export default function PaperDetailPage({ params }: { params: Promise<{ id: stri
           {(['edit', 'preview'] as const).map((m) => (
             <button
               key={m}
-              onClick={() => setMode(m)}
+              onClick={() => {
+                if (m === 'preview' && editorViewRef.current) {
+                  setNotes(editorViewRef.current.state.doc.toString());
+                }
+                setMode(m);
+              }}
               className={`text-xs px-3 py-1.5 rounded-md font-medium capitalize transition-colors ${
                 mode === m
                   ? 'bg-gray-100 dark:bg-zinc-800 text-gray-900 dark:text-zinc-100'
@@ -263,7 +271,6 @@ export default function PaperDetailPage({ params }: { params: Promise<{ id: stri
             editable={!selectionMode}
             onCreateEditor={(view) => { editorViewRef.current = view; }}
             onChange={(value, viewUpdate) => {
-              setNotes(value);
               setSaveStatus('idle');
               triggerSave(value);
 
@@ -303,7 +310,8 @@ export default function PaperDetailPage({ params }: { params: Promise<{ id: stri
           <div className="p-5 prose prose-sm dark:prose-invert max-w-none">
             {notes ? (
               <ReactMarkdown
-                remarkPlugins={[remarkGfm]}
+                remarkPlugins={[remarkGfm, remarkMath]}
+                rehypePlugins={[rehypeKatex]}
                 urlTransform={(url) => url}
                 components={{
                   // eslint-disable-next-line @typescript-eslint/no-explicit-any
