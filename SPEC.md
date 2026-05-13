@@ -116,6 +116,41 @@ The modal includes a **Folder** picker defaulting to the currently selected fold
 - Trash entry in sidebar shows current item count
 - 30-day purge runs silently on app load
 
+### Q&A Chat
+
+A floating prompt-builder panel for asking questions about a paper or requesting note edits.
+
+**Trigger:** A pill-shaped **Ask a question…** button anchored to the bottom of the divider between the PDF and notes panels. Clicking it fades the pill out and slides the panel up from the bottom of the screen. The pill reappears when the panel is closed.
+
+**Panel behaviour:**
+- Centered horizontally, fixed to the bottom of the viewport (not attached to the divider position)
+- Stays open while the user scrolls, reads, or interacts elsewhere in the app — no backdrop, non-blocking
+- Closed via the **×** button in the top-right corner of the panel
+- **⌘↵** copies the prompt immediately
+
+**Context attachments (optional, shown as cards above the textarea):**
+- **Text context** — selected text from the notes, attached via:
+  - Right-clicking selected text in **preview mode** → "Ask about this"
+  - Selecting text in **edit mode** and clicking the chat icon in the toolbar
+- **PDF region** — a rectangle drawn on the PDF, attached via the PDF icon button in the panel (Claude Code mode only); activates PDF selection mode
+
+**Target modes (segmented control):**
+- **Claude Code** — builds a structured `/ask-paper` invocation. Sub-modes:
+  - *Ask* — question answered by the agent
+  - *Edit notes* — agent makes targeted edits to the notes
+- **External** — builds a self-contained prompt with a research-assistant system instruction, full paper metadata, abstract, current notes, and the question; suitable for pasting into any AI tool
+
+**Copy button:** Gradient when active; transitions to gray "Copied." with a checkmark for 2 seconds after copying. Smooth cross-fade between states.
+
+### Q&A Thread History
+
+A collapsible **Q&A Log** section shown at the bottom of the notes **preview mode**. Hidden when there are no threads.
+
+- One section per session (thread), titled with its date and the number of questions
+- Expand a thread to see the full conversation as chat bubbles: user messages right-aligned (blue), assistant messages left-aligned (gray)
+- Refreshed automatically each time the user switches to preview mode
+- Threads are created by the `/ask-paper` agent and logged by the app's API; the UI is read-only
+
 ### Notes
 
 - Free-form Markdown attached to each Paper
@@ -184,6 +219,24 @@ Coordinates are normalized 0–1 relative to page dimensions (zoom-independent).
 | created_at | datetime | Used for timeline ordering |
 | updated_at | datetime | |
 
+### Thread
+| Field | Type | Notes |
+|---|---|---|
+| id | string (uuid) | |
+| paper_id | string | FK → Paper (cascade delete) |
+| created_at | datetime | |
+
+One thread is created per `/ask-paper` session. All messages from that session are attached to it.
+
+### Message
+| Field | Type | Notes |
+|---|---|---|
+| id | string (uuid) | |
+| thread_id | string | FK → Thread (cascade delete) |
+| role | enum | `user` \| `assistant` |
+| content | string | Plain text |
+| created_at | datetime | |
+
 ### Theme
 
 Stored in `localStorage` under the key `theme`. Values: `'light'` (default) | `'dark'`. Applied as a `dark` class on `<html>` before React hydration to prevent flash.
@@ -202,6 +255,43 @@ Generated format:
 - `@misc` otherwise
 
 Citation key format: `{firstAuthorLastName}{year}{firstSignificantTitleWord}` (lowercased, diacritics stripped).
+
+---
+
+---
+
+## API Endpoints (new)
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/papers/[id]/threads` | All threads for a paper, each with nested messages, newest first |
+| `POST` | `/api/papers/[id]/threads` | Create a new thread for a paper |
+| `POST` | `/api/threads/[id]/messages` | Append a message (`{ role, content }`) to a thread |
+
+---
+
+## Agent Skills
+
+### `/ask-paper`
+
+Interactive Q&A agent for a single paper. Invoked by pasting the prompt built by the ChatBox panel into a Claude Code session.
+
+**Inputs (parsed from the prompt):**
+- `paper_id` — identifies the paper in the app
+- `mode` — `ask` (answer questions) or `edit` (modify notes)
+- `text_context` (optional) — a quoted excerpt from the notes
+- `pdf_region` (optional) — page + normalized coordinates of a PDF rectangle
+- `question` — the user's question or edit instruction
+
+**Behaviour:**
+1. Fetches paper metadata from the app API
+2. Downloads the PDF to `/tmp/`
+3. Creates a new thread via the API
+4. Answers the question (or edits the notes), reading only the relevant PDF pages
+5. Logs both the user message and the assistant response to the thread
+6. Prompts for follow-up questions; loops until the user types `exit`
+
+All exchanges are visible in the app's Q&A Thread History immediately after being logged.
 
 ---
 

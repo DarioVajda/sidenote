@@ -77,3 +77,24 @@ The split-screen view for a Paper. Contains a header and a split-screen body.
 **Header** (above the split): title, authors, year, venue, source URL, and Reading Status — all visible at a glance. Description is editable inline. Abstract is hidden behind a "show abstract" toggle.
 
 **Body**: PDF panel and Notes panel separated by a draggable divider. The user can swap the positions of the two panels. Divider position and panel order are persisted per-paper.
+
+### ChatBox
+A floating prompt-builder panel that helps the user compose a question or edit instruction about a paper. Opened via the **Ask a question…** pill on the divider; closed via its **×** button. Non-blocking — the user can interact with the rest of the app while it is open.
+
+Builds one of two prompt formats depending on the selected target:
+- **Claude Code** — a structured `/ask-paper` invocation (with optional text context or PDF region)
+- **External** — a self-contained markdown prompt with a system instruction, full paper context, and the question
+
+Copying the prompt (via button or ⌘↵) transitions the button to a gray "Copied." state for 2 seconds.
+
+### Q&A Session (Thread)
+A single run of the `/ask-paper` skill. Each session creates one Thread in the database. All messages exchanged during that session — both user messages and agent responses — are logged to that thread via the API. A new session (new Claude Code invocation) always creates a new thread.
+
+### Thread
+A container for the messages from one Q&A Session. Belongs to a single Paper. Displayed as a collapsible entry in the Q&A Log section of the notes preview, titled with its creation date.
+
+### Message
+One turn within a Thread. Has a `role` (`user` or `assistant`) and `content` (plain text). Displayed as a chat bubble in the Q&A Log: user messages right-aligned in blue, assistant messages left-aligned in gray.
+
+### Q&A Log
+A collapsible section at the bottom of the notes preview mode listing all Threads for the current Paper. Hidden when no threads exist. Refreshed each time the user switches to preview mode.

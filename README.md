@@ -27,7 +27,9 @@ A companion **Claude Code agent** (`/do-research`) can do the reading for you: i
 | 📁 **Folder library** | Organise papers into a recursive folder tree; drag-and-drop to reorganise |
 | 📄 **Split-screen reader** | Resizable PDF viewer and Markdown notes editor side by side |
 | 🔗 **PDF references** | Draw a rectangle on any PDF region and embed a link to it directly in your notes |
-| 🤖 **AI agent** | `/do-research` reads the paper, analyses figures, and writes structured notes with PDF references |
+| 🤖 **AI research agent** | `/do-research` reads the paper, analyses figures, and writes structured notes with PDF references |
+| 💬 **Ask a question** | Floating prompt-builder lets you ask questions or request note edits — copies a ready-to-paste prompt for Claude Code or any external AI |
+| 📋 **Q&A thread history** | Every `/ask-paper` session is logged to the app; conversations are shown as collapsible threads in the notes preview |
 | 📝 **BibTeX export** | One click to copy a formatted BibTeX citation from any paper |
 | 🎓 **Scholar links** | Every author name links directly to their Google Scholar profile search |
 | 🗑️ **Trash + restore** | Soft-delete with 30-day auto-purge and per-paper restore |
@@ -81,6 +83,7 @@ npm run dev
 → Installing Claude Code agent skills...
   ✓ Linked do-research
   ✓ Linked before-research
+  ✓ Linked ask-paper
 → Checking system dependencies...
   ✓ pdftoppm
   ✓ Pillow
@@ -150,6 +153,28 @@ Then open Claude Code in your own research project and use the skills there:
 cd your-research-project
 claude
 ```
+
+### `/ask-paper`
+
+Start an interactive Q&A session about a paper. The agent fetches the paper and its PDF from the running app, answers your questions (or edits your notes) in a loop, and logs every exchange back to the app as a thread — visible in the paper's Q&A history.
+
+The easiest way to invoke it is through the **Ask a question** button in the paper detail view: it builds the structured prompt for you, including optional text or PDF-region context, and copies it to the clipboard. Paste it into Claude Code to start the session.
+
+```
+/ask-paper
+Paper: <paper-id>
+Mode: ask
+
+What does the paper say about the training stability of the model?
+```
+
+Supported modes:
+- **ask** — answer questions about the paper
+- **edit** — make targeted edits to your notes based on your instruction
+
+The session stays open in a loop; type `exit` to end it.
+
+---
 
 ### `/before-research`
 
