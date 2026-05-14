@@ -43,6 +43,9 @@ next-env.d.ts
 # user data
 /data/
 
+# private research contexts (never commit)
+/research_context/
+
 # local claude code settings
 /.claude/
 

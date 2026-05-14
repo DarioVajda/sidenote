@@ -28,7 +28,9 @@ A persistent top nav bar with:
 
 ### 1. Paper List (default / home)
 
-Two-column layout: **Folder Sidebar** on the left, **Paper List** on the right.
+**All Papers view:** Two-column layout — **Folder Sidebar** on the left, **Paper List** on the right.
+
+**Folder view (any folder selected):** Three-column layout on wide screens — **Folder Sidebar** | **Project Summary** | **Paper List**. On narrow screens the Project Summary panel moves below the paper list. The Project Summary panel is 450px wide and shows the contents of `research_context/{project}/PROJECT_SUMMARY.md` for the top-level ancestor folder of the selected folder; it shows a placeholder if no summary file exists yet.
 
 **Folder Sidebar:**
 - Resizable — drag the right edge to set width (min 160px, max 480px, default 208px)
@@ -39,7 +41,7 @@ Two-column layout: **Folder Sidebar** on the left, **Paper List** on the right.
 - Right-click sidebar background → New Folder (root level)
 - `+` button in the sidebar header → New Folder (root level)
 - Papers are also listed under their folders in the sidebar; clicking a paper in the sidebar navigates to its detail view
-- Drag a paper card (from the sidebar only) onto a folder → moves paper to that folder
+- Drag a paper card (from the sidebar or the main paper list) onto a folder → moves paper to that folder
 - Drag a folder onto another folder → moves entire subtree; cycle prevention enforced (cannot drop into own descendant)
 
 **Paper List (right panel):**
@@ -267,6 +269,7 @@ Citation key format: `{firstAuthorLastName}{year}{firstSignificantTitleWord}` (l
 | `GET` | `/api/papers/[id]/threads` | All threads for a paper, each with nested messages, newest first |
 | `POST` | `/api/papers/[id]/threads` | Create a new thread for a paper |
 | `POST` | `/api/threads/[id]/messages` | Append a message (`{ role, content }`) to a thread |
+| `GET` | `/api/folders/[id]/summary` | Returns `{ markdown: string \| null }` — reads `PROJECT_SUMMARY.md` for the top-level ancestor folder of `[id]` from `research_context/` |
 
 ---
 

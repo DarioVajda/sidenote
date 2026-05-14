@@ -11,22 +11,46 @@ You are a meticulous research analyst. Your job is to read the given paper and p
 
 **App base URL:** `http://localhost:3000` (override with `NOTES_APP_URL` env var if set)
 
-**Research context:** Check for `RESEARCH_CONTEXT.md` in the current working directory. If absent, print one line — "No RESEARCH_CONTEXT.md found. Run /before-research to add research context. Proceeding without Relevance section." — and continue.
+Locate the Sidenote repo root and research context directory:
+
+```bash
+REPO_ROOT=$(git rev-parse --show-toplevel 2>/dev/null || echo ".")
+RESEARCH_DIR="$REPO_ROOT/research_context"
+```
 
 **Focus directive:** The user may pass an optional instruction after the paper identifier, e.g.:
 `/do-research "paper title" "focus on the graph tokenization mechanism, skip ablations"`
 If present, treat this as a focus directive: allocate extra depth to the named topics and actively de-prioritise everything marked as skippable. Use it to shape both note depth and the Relevance section.
 
+## Step 0 — Parse invocation and pre-resolve project
+
+Parse the full invocation text for:
+
+1. **Paper identifier** — URL, title, or citation string.
+2. **Focus directive** — an optional quoted instruction (e.g. `"focus on X, skip Y"`).
+3. **Project hint** — natural language phrases like *"add to project X"*, *"for project X"*, *"in project X"*, *"project: X"*.
+
+If a project hint is found, resolve it now:
+
+```bash
+ls "$RESEARCH_DIR" 2>/dev/null
+```
+
+Find the directory whose name best matches the hint (fuzzy/substring match). Read its frontmatter:
+
+```bash
+grep 'folder_id:' "$RESEARCH_DIR/<matched_dir>/RESEARCH_CONTEXT.md"
+```
+
+Store: `project_dir = <matched_dir>`, `project_folder_id = <id>`.
+
+If no project hint is found, set `project_dir = null`, `project_folder_id = null` for now — resolution happens after Step 1.
+
 ## Step 1 — Resolve the paper
 
 The user's input is one of: a URL, an approximate title, or a full citation string (e.g. `Vaswani et al., "Attention Is All You Need", NeurIPS 2017`). An optional quoted focus directive may follow.
 
-**If it looks like a URL:** import directly:
-```
-POST {base}/api/import
-{"url": "<url>"}
-```
-Response is the paper object (status 200 = already existed, 201 = freshly imported). Extract `id`.
+**If it looks like a URL:** check the local library first (see title/citation path below), then import if not found.
 
 **If it looks like a title or citation string:**
 
@@ -34,27 +58,42 @@ Response is the paper object (status 200 = already existed, 201 = freshly import
    ```
    GET {base}/api/papers
    ```
-   Fuzzy-match against `originalTitle` and `customTitle`. If a confident match is found, use that `id` and skip the rest of this step.
+   Fuzzy-match against `originalTitle` and `customTitle`. If a confident match is found, use that paper — set `paper_is_new = false`, extract `id` and `folderId`. Skip the import steps.
 
 2. **Infer a direct URL from the citation.** If the input includes enough metadata (venue, year, authors), reason about where the canonical version lives:
    - NeurIPS / ICML / ICLR / ACL / EMNLP / NAACL / CVPR / ICCV / ECCV / AAAI and most ML/NLP/CV venues → try `https://arxiv.org/search/?query=<title>&searchtype=all`; fetch the page and extract the first result's `/abs/` link, then convert to `https://arxiv.org/pdf/<id>`
    - ACL Anthology venues (ACL, EMNLP, NAACL, EACL, etc.) → also try `https://aclanthology.org/search/?q=<title>` for a direct PDF
    - If the DOI is known or inferable (e.g. from a journal citation), try `https://doi.org/<doi>`
 
-   Attempt `POST {base}/api/import` with the inferred URL. If it succeeds (200 or 201), proceed.
-
 3. **arXiv search fallback.** If no URL could be inferred or the import failed, search the arXiv API:
    ```
    https://export.arxiv.org/api/query?search_query=ti:<title terms>&max_results=3
    ```
-   Parse the Atom XML response, pick the best title match, extract its `<id>` URL (convert `/abs/` → `/pdf/` for the import), and attempt `POST {base}/api/import`.
+   Parse the Atom XML response, pick the best title match, extract its `<id>` URL (convert `/abs/` → `/pdf/` for the import), and use that URL.
 
-4. **Google Scholar fallback.** If arXiv returns no useful results (paper is not on arXiv), construct a search URL and ask the user to locate the PDF:
+4. **Google Scholar fallback.** If arXiv returns no useful results, construct a search URL and ask the user to locate the PDF:
    ```
    https://scholar.google.com/scholar?q=<url-encoded title and authors>
    ```
    Print: "Couldn't locate a PDF automatically. Try this Scholar search: <url> — paste the PDF or abstract URL here and I'll continue."
-   Wait for the user to provide a URL, then import it.
+   Wait for the user to provide a URL, then use it.
+
+**Before importing a new paper:** if `project_folder_id` is still null (no hint was given), resolve the project now:
+
+```bash
+ls "$RESEARCH_DIR" 2>/dev/null
+```
+
+List the existing project directories and ask the user: *"Which research project should this paper be added to?"* Include a **"No project / skip"** option. If the user picks a project, read its frontmatter and set `project_dir` and `project_folder_id`.
+
+**Import the paper:**
+
+```
+POST {base}/api/import
+{"url": "<url>", "folderId": "<project_folder_id or omit if null>"}
+```
+
+Response: status 200 = already existed, 201 = freshly imported. Extract `id`. Set `paper_is_new = (status == 201)`.
 
 Once you have the paper ID, download the PDF to a temp file:
 
@@ -63,11 +102,28 @@ curl -s "{base}/api/papers/{id}/pdf" -o /tmp/paper_{id}.pdf
 ```
 
 Confirm the file exists and is non-empty:
+
 ```bash
 ls -lh /tmp/paper_{id}.pdf
 ```
 
 The local path `/tmp/paper_{id}.pdf` is your PDF for all subsequent steps.
+
+## Research context
+
+After Step 1, load the research context as follows:
+
+**If `project_dir` is already resolved** (from a hint or user choice during import): read `$RESEARCH_DIR/{project_dir}/RESEARCH_CONTEXT.md`. Use it for the Relevance section and Further Reading ranking.
+
+**If `project_dir` is null and `paper_is_new = false`** (paper was already in the library):
+- From the paper object, get `folderId`.
+- If `folderId` is null: no project. Print *"No research project associated with this paper. Proceeding without Relevance section."* and continue.
+- Otherwise, get all folders: `GET {base}/api/folders`. Walk up from `folderId` by following `parentId` until `parentId` is null — that is the top-level folder. Note its `id` as `top_folder_id`.
+- Scan all `RESEARCH_CONTEXT.md` files for a matching `folder_id`:
+  ```bash
+  grep -rl "folder_id: <top_folder_id>" "$RESEARCH_DIR" 2>/dev/null
+  ```
+- If found, set `project_dir` to the containing directory name and read the file. If not found, print *"No research context found for this paper's project folder. Proceeding without Relevance section."* and continue.
 
 ## Step 2 — Pass #1: Orient (text only)
 
@@ -117,7 +173,7 @@ Total notes should be readable in under 10 minutes.
 
 ### Notes format
 
-Exactly these `##` sections in this order. Add `###` subsections within any section as needed. Omit `## Relevance` entirely if no `RESEARCH_CONTEXT.md` was found.
+Exactly these `##` sections in this order. Add `###` subsections within any section as needed. Omit `## Relevance` entirely if no research context was found.
 
 ```markdown
 ## Overview
@@ -138,7 +194,7 @@ Exactly these `##` sections in this order. Add `###` subsections within any sect
 
 ## Relevance
 
-[Only if RESEARCH_CONTEXT.md exists. Bullet list mapping each Key Question to what the paper says about it. End with a "Watch out for:" line if relevant.]
+[Only if research context exists. Bullet list mapping each Key Question to what the paper says about it. End with a "Watch out for:" line if relevant.]
 
 ## Further Reading
 
@@ -184,14 +240,14 @@ While reading the paper, note which referenced works are cited most prominently 
 
 After the deep read, select 3–6 of those works for the Further Reading section. Rank them as follows:
 
-1. **If `RESEARCH_CONTEXT.md` exists:** rank primarily by how well the paper maps to the Key Questions and research goals, then secondarily by how central it was to the target paper.
+1. **If research context exists:** rank primarily by how well the paper maps to the Key Questions and research goals, then secondarily by how central it was to the target paper.
 2. **If no context exists:** rank purely by how central the paper was to the target paper (frequency of citation, role as baseline or foundation).
 
 For each entry, include:
 - Full citation: title, all authors as listed in the bibliography, year, venue/journal, and volume/pages if present
 - One sentence on its role in the target paper (e.g. "primary baseline for the main results table", "introduced the architecture this work extends")
-- If `RESEARCH_CONTEXT.md` exists and the paper is relevant to your research: one sentence on why
-- A `/do-research` prompt box using the full citation string so the agent can auto-resolve it without a URL. The focus directive should tell a future agent exactly what to pay attention to — which mechanism, which result, which open question — so that reading that paper directly advances the research agenda. Make it specific and opinionated, not generic.
+- If research context exists and the paper is relevant to your research: one sentence on why
+- A `/do-research` prompt block so a future agent can pick it up immediately. Include the project if one is active.
 
 Format:
 
@@ -201,16 +257,18 @@ Format:
 - **Title** · Firstname Lastname, Firstname Lastname · Year · Venue
   Full citation: Lastname, F., Lastname, F., et al. "Title." *Venue* (Year).
   Role in this paper: [one sentence].
-  [Relevance to your research: one sentence. — only if RESEARCH_CONTEXT.md exists and relevant]
+  [Relevance to your research: one sentence. — only if research context exists and relevant]
 
   ```prompt
-  /do-research "Lastname et al., 'Title', Venue Year" "[specific focus directive: what to zoom in on, what to skip, and why it matters for the research agenda]"
+  /do-research read "Lastname et al., 'Title', Venue Year" and add to project <project_dir>. [specific focus directive: what to zoom in on, what to skip, and why it matters for the research agenda]
   ```
 
 - ...
 ```
 
-**Writing the focus directive:** Combine two things — (1) what aspect of this paper was most load-bearing in the current work (the baseline it provides, the technique it introduces, the dataset it defines), and (2) which Key Question from `RESEARCH_CONTEXT.md` it most directly speaks to. The directive should read as a concrete instruction: "focus on X because it bears on Y", not "this paper is interesting". If no `RESEARCH_CONTEXT.md` exists, base the directive purely on what angle would be most useful given the current paper's findings.
+If no project is active (no `project_dir`), omit the "and add to project ..." clause entirely.
+
+**Writing the focus directive:** Combine two things — (1) what aspect of this paper was most load-bearing in the current work (the baseline it provides, the technique it introduces, the dataset it defines), and (2) which Key Question from the research context it most directly speaks to. The directive should read as a concrete instruction: "focus on X because it bears on Y", not "this paper is interesting". If no research context exists, base the directive purely on what angle would be most useful given the current paper's findings.
 
 ### Write the notes
 

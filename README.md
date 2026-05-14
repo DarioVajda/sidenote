@@ -146,11 +146,11 @@ cd path/to/sidenote
 npm run dev
 ```
 
-Then open Claude Code in your own research project and use the skills there:
+Then open Claude Code in the Sidenote repo and use the skills from there:
 
 ```bash
-# Terminal 2 — your research project
-cd your-research-project
+# Terminal 2 — Sidenote repo
+cd path/to/sidenote
 claude
 ```
 
@@ -178,7 +178,10 @@ The session stays open in a loop; type `exit` to end it.
 
 ### `/before-research`
 
-Run this once per research project to create a `RESEARCH_CONTEXT.md` in the current directory. The agent interviews you about your goals and open questions, then writes the file. `/do-research` reads it on every invocation to add a **Relevance** section tailored to your work.
+Run this once per research project to set up a project context. The agent asks which Sidenote folder the project maps to (or creates a new one), then interviews you about your goals and open questions. It writes two files into `research_context/{project}/` inside the Sidenote repo:
+
+- `RESEARCH_CONTEXT.md` — machine-readable context that `/do-research` reads on every invocation to add a **Relevance** section tailored to your work
+- `PROJECT_SUMMARY.md` — human-readable summary displayed in the app when you select that project folder
 
 ```
 /before-research
@@ -215,7 +218,7 @@ Review               Crop and verify every reference; patch anything wrong
 ## Method
 ## Results
 ## Limitations
-## Relevance   ← only present if RESEARCH_CONTEXT.md exists in the current directory
+## Relevance   ← only present if the paper belongs to a project with a RESEARCH_CONTEXT.md
 ```
 
 **System dependencies** (checked by `npm run setup`):

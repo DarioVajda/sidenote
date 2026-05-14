@@ -66,8 +66,29 @@ export default function PaperCard({ paper, onStatusChange, onDelete }: Props) {
     setConfirming(false);
   }
 
+  function handleDragStart(e: React.DragEvent) {
+    e.dataTransfer.setData('text/plain', JSON.stringify({ type: 'paper', id: paper.id }));
+    e.dataTransfer.effectAllowed = 'move';
+
+    const ghost = document.createElement('div');
+    ghost.textContent = paper.originalTitle.length > 40
+      ? paper.originalTitle.slice(0, 40) + '…'
+      : paper.originalTitle;
+    Object.assign(ghost.style, {
+      position: 'fixed', top: '-200px', left: '-200px',
+      padding: '4px 10px', borderRadius: '6px',
+      background: '#3b82f6', color: '#fff',
+      fontSize: '12px', fontWeight: '500',
+      whiteSpace: 'nowrap', pointerEvents: 'none',
+      boxShadow: '0 2px 8px rgba(0,0,0,0.25)',
+    });
+    document.body.appendChild(ghost);
+    e.dataTransfer.setDragImage(ghost, ghost.offsetWidth / 2, 16);
+    setTimeout(() => ghost.remove(), 0);
+  }
+
   return (
-    <Link href={`/papers/${paper.id}`} className="block">
+    <Link href={`/papers/${paper.id}`} className="block" draggable onDragStart={handleDragStart}>
       <div className="group relative bg-white dark:bg-zinc-800 border border-gray-200 dark:border-zinc-700 rounded-lg p-5 hover:border-blue-300 dark:hover:border-blue-600 hover:shadow-sm transition-all">
         {confirming && (
           <div

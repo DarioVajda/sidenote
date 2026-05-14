@@ -1,11 +1,13 @@
 'use client';
 
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, Suspense } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { Paper, Folder, ReadingStatus } from '@/lib/types';
 import PaperCard from '@/components/papers/PaperCard';
 import AddPaperModal from '@/components/papers/AddPaperModal';
 import FolderSidebar from '@/components/folders/FolderSidebar';
 import TrashView from '@/components/papers/TrashView';
+import ProjectSummary from '@/components/papers/ProjectSummary';
 
 function getDescendantIds(folders: Folder[], rootId: string): string[] {
   const result: string[] = [rootId];
@@ -28,12 +30,37 @@ function flattenFolders(folders: Folder[], parentId: string | null = null, depth
 }
 
 export default function HomePage() {
+  return (
+    <Suspense>
+      <HomeContent />
+    </Suspense>
+  );
+}
+
+function HomeContent() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+
   const [papers, setPapers] = useState<Paper[]>([]);
   const [trashedPapers, setTrashedPapers] = useState<Paper[]>([]);
   const [folders, setFolders] = useState<Folder[]>([]);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
-  const [selectedView, setSelectedView] = useState<string>('all');
+
+  const selectedView = searchParams.get('folder') ?? searchParams.get('view') ?? 'all';
+
+  function setSelectedView(view: string) {
+    const params = new URLSearchParams();
+    if (view === 'all') {
+      // no param needed — clean URL
+    } else if (view === 'trash') {
+      params.set('view', 'trash');
+    } else {
+      params.set('folder', view);
+    }
+    const qs = params.toString();
+    router.push(qs ? `/?${qs}` : '/');
+  }
 
   useEffect(() => {
     Promise.all([
@@ -153,6 +180,53 @@ export default function HomePage() {
 
   const flatFolders = flattenFolders(folders);
 
+  const paperListContent = (
+    <>
+      <div className="flex items-center justify-between mb-6">
+        <h1 className="text-xl font-semibold text-gray-900 dark:text-zinc-100">
+          {selectedView === 'all'
+            ? 'All Papers'
+            : folders.find(f => f.id === selectedView)?.name ?? 'Papers'}
+        </h1>
+        <button
+          onClick={() => setShowModal(true)}
+          className="flex items-center gap-1.5 bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M5 12h14M12 5v14" />
+          </svg>
+          Add paper
+        </button>
+      </div>
+      {loading ? (
+        <div className="flex justify-center py-20">
+          <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600" />
+        </div>
+      ) : visiblePapers.length === 0 ? (
+        <div className="text-center py-20">
+          <p className="text-gray-400 dark:text-zinc-600 text-sm mb-3">No papers here</p>
+          <button
+            onClick={() => setShowModal(true)}
+            className="text-blue-600 hover:text-blue-700 text-sm font-medium"
+          >
+            Add your first paper →
+          </button>
+        </div>
+      ) : (
+        <div className="flex flex-col gap-2">
+          {visiblePapers.map(paper => (
+            <PaperCard
+              key={paper.id}
+              paper={paper}
+              onStatusChange={handleStatusChange}
+              onDelete={handleDelete}
+            />
+          ))}
+        </div>
+      )}
+    </>
+  );
+
   return (
     <div className="flex-1 flex min-h-0 overflow-hidden">
       <FolderSidebar
@@ -168,62 +242,35 @@ export default function HomePage() {
         onMoveFolder={handleMoveFolder}
       />
 
-      <div className="flex-1 min-w-0 overflow-auto">
-        {selectedView === 'trash' ? (
+      {selectedView === 'trash' ? (
+        <div className="flex-1 min-w-0 overflow-auto">
           <TrashView
             papers={trashedPapers}
             onRestore={handleRestore}
             onDeletePermanent={handleDeletePermanent}
             onEmptyTrash={handleEmptyTrash}
           />
-        ) : (
+        </div>
+      ) : selectedView === 'all' ? (
+        <div className="flex-1 min-w-0 overflow-auto">
           <div className="max-w-3xl mx-auto px-6 py-8">
-            <div className="flex items-center justify-between mb-6">
-              <h1 className="text-xl font-semibold text-gray-900 dark:text-zinc-100">
-                {selectedView === 'all'
-                  ? 'All Papers'
-                  : folders.find(f => f.id === selectedView)?.name ?? 'Papers'}
-              </h1>
-              <button
-                onClick={() => setShowModal(true)}
-                className="flex items-center gap-1.5 bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors"
-              >
-                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M5 12h14M12 5v14" />
-                </svg>
-                Add paper
-              </button>
-            </div>
-
-            {loading ? (
-              <div className="flex justify-center py-20">
-                <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600" />
-              </div>
-            ) : visiblePapers.length === 0 ? (
-              <div className="text-center py-20">
-                <p className="text-gray-400 dark:text-zinc-600 text-sm mb-3">No papers here</p>
-                <button
-                  onClick={() => setShowModal(true)}
-                  className="text-blue-600 hover:text-blue-700 text-sm font-medium"
-                >
-                  Add your first paper →
-                </button>
-              </div>
-            ) : (
-              <div className="flex flex-col gap-2">
-                {visiblePapers.map(paper => (
-                  <PaperCard
-                    key={paper.id}
-                    paper={paper}
-                    onStatusChange={handleStatusChange}
-                    onDelete={handleDelete}
-                  />
-                ))}
-              </div>
-            )}
+            {paperListContent}
           </div>
-        )}
-      </div>
+        </div>
+      ) : (
+        <div className="flex-1 min-w-0 overflow-hidden flex flex-col lg:flex-row">
+          {/* Paper list — first on narrow, right on wide */}
+          <div className="order-1 lg:order-2 flex-1 min-w-0 min-h-0 overflow-auto">
+            <div className="max-w-3xl mx-auto px-6 py-8">
+              {paperListContent}
+            </div>
+          </div>
+          {/* Project summary — below on narrow, left on wide */}
+          <div className="order-2 lg:order-1 shrink-0 lg:self-stretch">
+            <ProjectSummary folderId={selectedView} />
+          </div>
+        </div>
+      )}
 
       {showModal && (
         <AddPaperModal
