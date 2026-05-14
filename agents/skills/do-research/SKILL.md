@@ -164,6 +164,7 @@ Write tight. Every sentence must earn its place.
 
 - **Overview:** 4–6 sentences maximum
 - **Method:** cover only the 2–4 most important components; skip minor implementation details
+- **Baselines:** 2–5 bullet points, one per baseline
 - **Results:** the 3–5 numbers that matter most; one sentence of context per result
 - **Limitations:** 3–5 bullet points
 - **Relevance:** 3–6 bullet points mapping the paper to Key Questions
@@ -184,9 +185,13 @@ Exactly these `##` sections in this order. Add `###` subsections within any sect
 
 [The 2–4 most important components only. Enough detail to understand the approach. Use ### subsections for distinct components. Skip minor details.]
 
+## Baselines
+
+[Bullet list. One entry per baseline the authors compare against. For each: name, one sentence on what it is and why it is a meaningful point of comparison. Every entry must carry a PDF reference anchored to where the baseline is introduced or the comparison table appears.]
+
 ## Results
 
-[3–5 key results with numbers. Baselines compared against. What the numbers actually mean.]
+[3–5 key results with numbers. What the numbers actually mean. Every number must be anchored to its source in the paper.]
 
 ## Limitations
 

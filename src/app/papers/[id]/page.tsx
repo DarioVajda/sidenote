@@ -15,13 +15,14 @@ import { markdown, markdownLanguage } from '@codemirror/lang-markdown';
 import { languages } from '@codemirror/language-data';
 import { githubLight, githubDark } from '@uiw/codemirror-theme-github';
 import { EditorView } from '@codemirror/view';
-import ChatBox from '@/components/papers/ChatBox';
-import QALog from '@/components/papers/QALog';
+import QAPanel from '@/components/papers/QAPanel';
 
 const PdfViewer = dynamic(() => import('@/components/papers/PdfViewer'), { ssr: false });
 
 type SaveStatus = 'idle' | 'saving' | 'saved';
 type PanelOrder = 'pdf-left' | 'notes-left';
+
+const MIN_QA_HEIGHT = 280;
 
 type PendingInsert =
   | { mode: 'replace'; from: number; to: number; label: string }
@@ -133,6 +134,15 @@ export default function PaperDetailPage({ params }: { params: Promise<{ id: stri
   const isDragging = useRef(false);
   const [dividerDragging, setDividerDragging] = useState(false);
 
+  // Q&A panel state
+  const [qaColumn, setQaColumn] = useState<'left' | 'right'>('left');
+  const [qaCollapsed, setQaCollapsed] = useState(false);
+  const [qaHeight, setQaHeight] = useState(MIN_QA_HEIGHT);
+  const [qaDividerDragging, setQaDividerDragging] = useState(false);
+  const qaIsDragging = useRef(false);
+  const leftColRef = useRef<HTMLDivElement>(null);
+  const rightColRef = useRef<HTMLDivElement>(null);
+
   const [selectionMode, setSelectionMode] = useState(false);
   const [activeRef, setActiveRef] = useState<PdfRef | null>(null);
   const pendingInsertRef = useRef<PendingInsert | null>(null);
@@ -140,8 +150,7 @@ export default function PaperDetailPage({ params }: { params: Promise<{ id: stri
   const editorViewRef = useRef<any>(null);
   const pendingSelectRef = useRef<{ word: string; line: number | null } | null>(null);
 
-  // Chat / Q&A state
-  const [chatOpen, setChatOpen] = useState(false);
+  // Q&A context state
   const [toastVisible, setToastVisible] = useState(false);
   const [questionSelectionMode, setQuestionSelectionMode] = useState(false);
   const [questionPdfRegion, setQuestionPdfRegion] = useState<PdfRef | null>(null);
@@ -149,7 +158,7 @@ export default function PaperDetailPage({ params }: { params: Promise<{ id: stri
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; text: string } | null>(null);
   const [qaRefreshKey, setQaRefreshKey] = useState(0);
 
-  useEffect(() => { if (questionTextContext) setChatOpen(true); }, [questionTextContext]);
+  useEffect(() => { if (questionTextContext) setQaCollapsed(false); }, [questionTextContext]);
 
   function handlePromptCopied() {
     setToastVisible(true);
@@ -157,6 +166,32 @@ export default function PaperDetailPage({ params }: { params: Promise<{ id: stri
   }
 
   const dark = useDark();
+
+  // Keep a ref to mode so the polling callback always sees the current value
+  const modeRef = useRef(mode);
+  useEffect(() => { modeRef.current = mode; }, [mode]);
+
+  // Poll for backend changes every 3s; skip while tab is hidden or notes are being edited
+  const lastUpdatedAt = useRef<string | null>(null);
+  useEffect(() => {
+    const poll = async () => {
+      if (document.visibilityState === 'hidden') return;
+      try {
+        const res = await fetch(`/api/papers/${id}`);
+        if (!res.ok) return;
+        const latest = await res.json();
+        if (!lastUpdatedAt.current) { lastUpdatedAt.current = latest.updatedAt; return; }
+        if (latest.updatedAt === lastUpdatedAt.current) return;
+        lastUpdatedAt.current = latest.updatedAt;
+        setPaper(latest);
+        setQaRefreshKey(k => k + 1);
+        // Don't overwrite in-progress edits
+        if (modeRef.current !== 'edit') setNotes(latest.notes ?? '');
+      } catch { /* ignore */ }
+    };
+    const interval = setInterval(poll, 3000);
+    return () => clearInterval(interval);
+  }, [id]);
 
   // Cmd/Ctrl+Enter — switch to preview
   useEffect(() => {
@@ -246,6 +281,30 @@ export default function PaperDetailPage({ params }: { params: Promise<{ id: stri
   function onDividerPointerUp() {
     isDragging.current = false;
     setDividerDragging(false);
+  }
+
+  function onQaDividerPointerDown(e: React.PointerEvent<HTMLDivElement>) {
+    qaIsDragging.current = true;
+    setQaDividerDragging(true);
+    e.currentTarget.setPointerCapture(e.pointerId);
+  }
+  function onQaDividerPointerMove(e: React.PointerEvent<HTMLDivElement>) {
+    if (!qaIsDragging.current) return;
+    const colRef = qaColumn === 'left' ? leftColRef : rightColRef;
+    if (!colRef.current) return;
+    const rect = colRef.current.getBoundingClientRect();
+    const newHeight = rect.bottom - e.clientY;
+    if (newHeight < MIN_QA_HEIGHT * 0.5) {
+      // Snap to collapsed but keep drag active so dragging back up re-expands
+      setQaCollapsed(true);
+    } else {
+      setQaCollapsed(false);
+      setQaHeight(Math.max(MIN_QA_HEIGHT, Math.min(rect.height - 80, newHeight)));
+    }
+  }
+  function onQaDividerPointerUp() {
+    qaIsDragging.current = false;
+    setQaDividerDragging(false);
   }
 
   function handleRefToolbarClick() {
@@ -510,7 +569,6 @@ export default function PaperDetailPage({ params }: { params: Promise<{ id: stri
             ) : (
               <p className="text-gray-400 dark:text-zinc-500 italic not-prose text-sm">No notes yet.</p>
             )}
-            {paper && <QALog paperId={paper.id} refreshKey={qaRefreshKey} />}
           </div>
         )}
       </div>
@@ -582,11 +640,50 @@ export default function PaperDetailPage({ params }: { params: Promise<{ id: stri
       </div>
 
       <div ref={containerRef} className="flex-1 flex min-h-0 overflow-hidden">
-        <div style={{ width: `${leftPct}%` }} className={`min-w-0 overflow-hidden flex flex-col${dividerDragging ? ' pointer-events-none select-none' : ''}`}>
-          {isPdfLeft ? pdfPanel : notesPanel}
+        {/* Left column */}
+        <div
+          ref={leftColRef}
+          style={{ width: `${leftPct}%` }}
+          className={`min-w-0 overflow-hidden flex flex-col${dividerDragging || qaDividerDragging ? ' pointer-events-none select-none' : ''}`}
+        >
+          <div className="flex-1 min-h-0 overflow-hidden">
+            {isPdfLeft ? pdfPanel : notesPanel}
+          </div>
+          {qaColumn === 'left' && (
+            <div
+              className={`h-3 shrink-0 cursor-row-resize relative group/qadiv select-none${qaCollapsed ? ' invisible' : ''}`}
+              onPointerDown={onQaDividerPointerDown}
+              onPointerMove={onQaDividerPointerMove}
+              onPointerUp={onQaDividerPointerUp}
+            >
+              <div className="absolute inset-x-0 top-1/2 -translate-y-1/2 h-px bg-gray-200 dark:bg-zinc-700 group-hover/qadiv:bg-blue-400 dark:group-hover/qadiv:bg-blue-600 transition-colors" />
+            </div>
+          )}
+          {qaColumn === 'left' && (
+            <div
+              className="shrink-0 overflow-hidden"
+              style={!qaCollapsed ? { height: qaHeight } : {}}
+            >
+              <QAPanel
+                paper={paper}
+                notes={notes}
+                column={qaColumn}
+                collapsed={qaCollapsed}
+                onToggleCollapse={() => setQaCollapsed(c => !c)}
+                onMoveColumn={() => setQaColumn(c => c === 'left' ? 'right' : 'left')}
+                onRequestPdfRegion={() => setQuestionSelectionMode(true)}
+                pdfRegion={questionPdfRegion}
+                onClearPdfRegion={() => setQuestionPdfRegion(null)}
+                textContext={questionTextContext}
+                onClearTextContext={() => setQuestionTextContext(null)}
+                onCopied={handlePromptCopied}
+                refreshKey={qaRefreshKey}
+              />
+            </div>
+          )}
         </div>
 
-        {/* Divider */}
+        {/* Vertical divider */}
         <div
           className="relative w-5 shrink-0 cursor-col-resize select-none group/divider"
           onPointerDown={onDividerPointerDown}
@@ -604,49 +701,52 @@ export default function PaperDetailPage({ params }: { params: Promise<{ id: stri
               <path d="M8 3 4 7l4 4" /><path d="M4 7h16" /><path d="m16 21 4-4-4-4" /><path d="M20 17H4" />
             </svg>
           </button>
-          {/* Ask pill */}
-          <button
-            className="absolute z-20 flex items-center gap-2 px-4 py-2 rounded-full text-white text-xs font-medium whitespace-nowrap cursor-pointer hover:brightness-110"
-            style={{
-              bottom: 20,
-              left: '50%',
-              background: 'linear-gradient(135deg, #3b82f6, #a855f7, #ec4899)',
-              boxShadow: '0 4px 20px rgba(168,85,247,0.4)',
-              opacity: chatOpen ? 0 : 1,
-              pointerEvents: chatOpen ? 'none' : 'auto',
-              transform: chatOpen ? 'translateX(-50%) scale(0.9)' : 'translateX(-50%)',
-              transition: 'opacity 250ms ease, transform 250ms ease',
-            }}
-            onPointerDown={(e) => e.stopPropagation()}
-            onClick={() => setChatOpen(true)}
-            title="Ask a question about this paper"
-          >
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-            </svg>
-            Ask a question…
-          </button>
         </div>
 
-        <div className={`flex-1 min-w-0 overflow-hidden flex flex-col${dividerDragging ? ' pointer-events-none select-none' : ''}`}>
-          {isPdfLeft ? notesPanel : pdfPanel}
+        {/* Right column */}
+        <div
+          ref={rightColRef}
+          className={`flex-1 min-w-0 overflow-hidden flex flex-col${dividerDragging || qaDividerDragging ? ' pointer-events-none select-none' : ''}`}
+        >
+          <div className="flex-1 min-h-0 overflow-hidden">
+            {isPdfLeft ? notesPanel : pdfPanel}
+          </div>
+          {qaColumn === 'right' && (
+            <div
+              className={`h-3 shrink-0 cursor-row-resize relative group/qadiv select-none${qaCollapsed ? ' invisible' : ''}`}
+              onPointerDown={onQaDividerPointerDown}
+              onPointerMove={onQaDividerPointerMove}
+              onPointerUp={onQaDividerPointerUp}
+            >
+              <div className="absolute inset-x-0 top-1/2 -translate-y-1/2 h-px bg-gray-200 dark:bg-zinc-700 group-hover/qadiv:bg-blue-400 dark:group-hover/qadiv:bg-blue-600 transition-colors" />
+            </div>
+          )}
+          {qaColumn === 'right' && (
+            <div
+              className="shrink-0 overflow-hidden"
+              style={!qaCollapsed ? { height: qaHeight } : {}}
+            >
+              <QAPanel
+                paper={paper}
+                notes={notes}
+                column={qaColumn}
+                collapsed={qaCollapsed}
+                onToggleCollapse={() => setQaCollapsed(c => !c)}
+                onMoveColumn={() => setQaColumn(c => c === 'left' ? 'right' : 'left')}
+                onRequestPdfRegion={() => setQuestionSelectionMode(true)}
+                pdfRegion={questionPdfRegion}
+                onClearPdfRegion={() => setQuestionPdfRegion(null)}
+                textContext={questionTextContext}
+                onClearTextContext={() => setQuestionTextContext(null)}
+                onCopied={handlePromptCopied}
+                refreshKey={qaRefreshKey}
+              />
+            </div>
+          )}
         </div>
       </div>
 
     </div>
-
-    <ChatBox
-      open={chatOpen}
-      onClose={() => setChatOpen(false)}
-      onCopied={handlePromptCopied}
-      paper={paper}
-      notes={notes}
-      onRequestPdfRegion={() => setQuestionSelectionMode(true)}
-      pdfRegion={questionPdfRegion}
-      onClearPdfRegion={() => setQuestionPdfRegion(null)}
-      textContext={questionTextContext}
-      onClearTextContext={() => setQuestionTextContext(null)}
-    />
 
     {/* Copied toast */}
     <div

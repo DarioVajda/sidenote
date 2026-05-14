@@ -37,10 +37,13 @@ export async function POST(_req: NextRequest, { params }: Params) {
   const [paper] = await db.select({ id: papers.id }).from(papers).where(eq(papers.id, id));
   if (!paper) return NextResponse.json({ error: 'Not found' }, { status: 404 });
 
+  const now = new Date();
   const [thread] = await db
     .insert(threads)
-    .values({ id: randomUUID(), paperId: id, createdAt: new Date() })
+    .values({ id: randomUUID(), paperId: id, createdAt: now })
     .returning();
+
+  await db.update(papers).set({ updatedAt: now }).where(eq(papers.id, id));
 
   return NextResponse.json(serializeThread(thread), { status: 201 });
 }
